@@ -69,7 +69,12 @@ fn test_nonexistent_file() {
 
 #[test]
 fn test_json_only_flag_produces_json_output() {
-    let dmp = r"D:\code\CrashDumpDemo\App\CrashDump_20260628_013754.dmp";
+    let dmp = std::env::var("DMP_TEST_FILE_1").unwrap_or_default();
+    if dmp.is_empty() || !std::path::Path::new(&dmp).is_file() {
+        eprintln!("Skipping: DMP_TEST_FILE_1 not set");
+        return;
+    }
+    let dmp: &str = &dmp;
     let output = Command::new("cargo")
         .args(["run", "-p", "dmp-cli", "--", "analyze", dmp, "--json-only", "--timeout", "120"])
         .output()
