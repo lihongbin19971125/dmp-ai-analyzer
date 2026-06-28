@@ -509,6 +509,168 @@ fn extract_process_name(raw: &str) -> String {
         .unwrap_or_default()
 }
 
+// ── Memory Leak Analyzer ─────────────────────────────────
+
+/// Memory leak detection from heap statistics and system state.
+pub struct MemoryLeakAnalyzer {
+    heap: dmp_context::HeapInfo,
+    sys: dmp_context::SystemInfo,
+    addr: std::collections::HashMap<String, u64>,
+}
+
+const HIGH_COMMIT_PER_HEAP_MB: u32 = 100;
+const HIGH_RESERVED_RATIO: f64 = 3.0;
+const LOW_FREE_VIRTUAL_MB: u64 = 100;
+const HIGH_HEAP_COUNT: u32 = 20;
+const LONG_UPTIME_SECONDS: u64 = 86400 * 7;
+const HIGH_UPTIME_COMMIT_MB: u32 = 500;
+const HIGH_FRAGMENTATION_RATIO: f64 = 0.5;
+
+impl MemoryLeakAnalyzer {
+    pub fn new(dmp: &DmpData) -> Self {
+        Self {
+            heap: dmp.heap.clone(),
+            sys: dmp.system_info.clone(),
+            addr: dmp.address_summary.clone(),
+        }
+    }
+
+    pub fn analyze(&self) -> Vec<MemoryFinding> {
+        let mut findings = Vec::new();
+
+        for check in [
+            Self::check_high_commit,
+            Self::check_reserved_ratio,
+            Self::check_virtual_exhaustion,
+            Self::check_commit_vs_physical,
+            Self::check_heap_count,
+            Self::check_lfh_status,
+            Self::check_uptime_correlation,
+            Self::check_corruption,
+            Self::check_fragmentation,
+        ] {
+            if let Some(f) = check(self) {
+                findings.push(f);
+            }
+        }
+        findings
+    }
+
+    pub fn pressure_reason(findings: &[MemoryFinding]) -> String {
+        if findings.is_empty() { return String::new(); }
+        let high: Vec<_> = findings.iter().filter(|f| f.severity == "high").collect();
+        if !high.is_empty() {
+            format!("检测到 {} 个严重内存问题: {}", high.len(),
+                high.iter().take(3).map(|f| f.indicator.as_str()).collect::<Vec<_>>().join("; "))
+        } else {
+            format!("检测到 {} 个内存异常指标", findings.len())
+        }
+    }
+
+    fn check_high_commit(&self) -> Option<MemoryFinding> {
+        let avg = self.heap.total_committed_mb as f64 / self.heap.heap_count.max(1) as f64;
+        if avg > HIGH_COMMIT_PER_HEAP_MB as f64 {
+            Some(MemoryFinding {
+                indicator: "high_commit".into(), severity: "high".into(),
+                evidence: format!("堆平均提交 {:.0}MB (阈值 {}MB)", avg, HIGH_COMMIT_PER_HEAP_MB),
+                recommendation: "检查是否存在内存泄漏，使用 !heap -s -v 查看每堆详情".into(),
+            })
+        } else { None }
+    }
+
+    fn check_reserved_ratio(&self) -> Option<MemoryFinding> {
+        if self.heap.total_committed_mb == 0 { return None; }
+        let ratio = self.heap.total_reserved_mb as f64 / self.heap.total_committed_mb as f64;
+        if ratio > HIGH_RESERVED_RATIO {
+            Some(MemoryFinding {
+                indicator: "high_reserved_ratio".into(), severity: "high".into(),
+                evidence: format!("保留/提交比 {:.1}:1 (阈值 {}:1)", ratio, HIGH_RESERVED_RATIO),
+                recommendation: "高保留比表示堆碎片严重，考虑使用 LFH 或自定义分配器".into(),
+            })
+        } else { None }
+    }
+
+    fn check_virtual_exhaustion(&self) -> Option<MemoryFinding> {
+        let free = self.addr.get("Free").copied().unwrap_or(0);
+        if free > 0 && free < LOW_FREE_VIRTUAL_MB {
+            Some(MemoryFinding {
+                indicator: "virtual_exhaustion".into(), severity: "high".into(),
+                evidence: format!("虚拟地址空闲仅 {}MB (阈值 {}MB)", free, LOW_FREE_VIRTUAL_MB),
+                recommendation: "虚拟地址接近耗尽，即使物理内存充足也会分配失败。检查虚拟内存碎片".into(),
+            })
+        } else { None }
+    }
+
+    fn check_commit_vs_physical(&self) -> Option<MemoryFinding> {
+        let total = self.sys.process_working_set_mb + self.sys.process_pagefile_mb;
+        if total > 0 && total as f64 > self.sys.total_physical_mb as f64 * 0.8 {
+            Some(MemoryFinding {
+                indicator: "commit_exceeds_ram".into(), severity: "high".into(),
+                evidence: format!("进程提交 {}MB > 物理内存 80% ({}MB)", total, self.sys.total_physical_mb),
+                recommendation: "进程提交量已超过物理内存，可能触发页面文件交换导致性能下降".into(),
+            })
+        } else { None }
+    }
+
+    fn check_heap_count(&self) -> Option<MemoryFinding> {
+        if self.heap.heap_count > HIGH_HEAP_COUNT {
+            Some(MemoryFinding {
+                indicator: "high_heap_count".into(), severity: "medium".into(),
+                evidence: format!("{} 个堆 (阈值 {})", self.heap.heap_count, HIGH_HEAP_COUNT),
+                recommendation: "大量堆可能由 DLL 各自创建堆导致".into(),
+            })
+        } else { None }
+    }
+
+    fn check_lfh_status(&self) -> Option<MemoryFinding> {
+        if !self.heap.lfh_enabled && self.heap.total_committed_mb > 50 {
+            Some(MemoryFinding {
+                indicator: "lfh_disabled".into(), severity: "medium".into(),
+                evidence: format!("堆提交 {}MB 但 LFH 未启用", self.heap.total_committed_mb),
+                recommendation: "启用低碎片堆 (LFH) 以减少内存碎片".into(),
+            })
+        } else { None }
+    }
+
+    fn check_uptime_correlation(&self) -> Option<MemoryFinding> {
+        if self.sys.system_uptime_seconds > LONG_UPTIME_SECONDS
+            && self.heap.total_committed_mb > HIGH_UPTIME_COMMIT_MB
+        {
+            let hours = self.sys.system_uptime_seconds / 3600;
+            Some(MemoryFinding {
+                indicator: "uptime_leak_correlation".into(), severity: "high".into(),
+                evidence: format!("运行 {}h, 堆提交 {}MB", hours, self.heap.total_committed_mb),
+                recommendation: "长时间运行伴随高提交量 → 可能存在慢速内存泄漏".into(),
+            })
+        } else { None }
+    }
+
+    fn check_corruption(&self) -> Option<MemoryFinding> {
+        if self.heap.corrupted {
+            let details = self.heap.details.first().cloned().unwrap_or("堆损坏检测阳性".into());
+            Some(MemoryFinding {
+                indicator: "heap_corruption".into(), severity: "high".into(),
+                evidence: details.chars().take(200).collect(),
+                recommendation: "堆已损坏。可能是 use-after-free 或缓冲区溢出".into(),
+            })
+        } else { None }
+    }
+
+    fn check_fragmentation(&self) -> Option<MemoryFinding> {
+        if self.heap.total_reserved_mb > 0 && self.heap.free_bytes > 0 {
+            let ratio = self.heap.free_bytes as f64 / (self.heap.total_reserved_mb as f64 * 1024.0 * 1024.0);
+            if ratio > HIGH_FRAGMENTATION_RATIO {
+                Some(MemoryFinding {
+                    indicator: "high_fragmentation".into(), severity: "medium".into(),
+                    evidence: format!("碎片率 {:.0}% (free/reserved), 空闲 {}KB",
+                        ratio * 100.0, self.heap.free_bytes / 1024),
+                    recommendation: "高碎片率导致内存利用率低。考虑合并小分配、使用内存池或启用 LFH".into(),
+                })
+            } else { None }
+        } else { None }
+    }
+}
+
 // ═════════════════════════════════════════════════════════
 // Tests
 // ═════════════════════════════════════════════════════════
@@ -815,5 +977,95 @@ STACK_TEXT:
     fn test_parse_cdb_output_detect_kernel() {
         let dmp = parse_cdb_output(SAMPLE_FULL_CDB, "kernel.dmp");
         assert_eq!(dmp.metadata.dump_type, "kernel");
+    }
+
+    // ── MemoryLeakAnalyzer tests ─────────────────────────
+
+    fn make_dmp_for_memory(
+        heap_committed: u32, heap_reserved: u32, heap_count: u32,
+        free_bytes: u64, lfh_enabled: bool, corrupted: bool,
+        total_physical: u32, avail_physical: u32, process_ws: u32,
+        process_pf: u32, uptime: u64, free_virtual: u64,
+    ) -> DmpData {
+        DmpData {
+            heap: HeapInfo {
+                total_committed_mb: heap_committed,
+                total_reserved_mb: heap_reserved,
+                heap_count,
+                free_bytes,
+                lfh_enabled,
+                corrupted,
+                ..Default::default()
+            },
+            system_info: SystemInfo {
+                total_physical_mb: total_physical,
+                available_physical_mb: avail_physical,
+                process_working_set_mb: process_ws,
+                process_pagefile_mb: process_pf,
+                system_uptime_seconds: uptime,
+                ..Default::default()
+            },
+            address_summary: {
+                let mut m = std::collections::HashMap::new();
+                m.insert("Free".into(), free_virtual);
+                m.insert("Heap".into(), heap_committed as u64);
+                m
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_memory_high_commit_detected() {
+        let dmp = make_dmp_for_memory(600, 800, 5, 0, true, false, 16384, 8192, 128, 256, 3600, 100_000);
+        let analyzer = MemoryLeakAnalyzer::new(&dmp);
+        let findings = analyzer.analyze();
+        assert!(findings.iter().any(|f| f.indicator == "high_commit"));
+    }
+
+    #[test]
+    fn test_memory_healthy_no_findings() {
+        let dmp = make_dmp_for_memory(50, 80, 2, 0, true, false, 32768, 16384, 128, 200, 3600, 10_000_000);
+        let analyzer = MemoryLeakAnalyzer::new(&dmp);
+        let findings = analyzer.analyze();
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn test_memory_corruption_detected() {
+        let dmp = make_dmp_for_memory(200, 400, 3, 0, true, true, 16384, 8192, 128, 256, 3600, 100_000);
+        let analyzer = MemoryLeakAnalyzer::new(&dmp);
+        let findings = analyzer.analyze();
+        assert!(findings.iter().any(|f| f.indicator == "heap_corruption"));
+    }
+
+    #[test]
+    fn test_memory_virtual_exhaustion() {
+        let dmp = make_dmp_for_memory(200, 400, 3, 0, true, false, 16384, 8192, 128, 256, 3600, 50);
+        let analyzer = MemoryLeakAnalyzer::new(&dmp);
+        let findings = analyzer.analyze();
+        assert!(findings.iter().any(|f| f.indicator == "virtual_exhaustion"));
+    }
+
+    #[test]
+    fn test_memory_lfh_disabled() {
+        let dmp = make_dmp_for_memory(500, 800, 10, 0, false, false, 16384, 8192, 128, 256, 3600, 100_000);
+        let analyzer = MemoryLeakAnalyzer::new(&dmp);
+        let findings = analyzer.analyze();
+        assert!(findings.iter().any(|f| f.indicator == "lfh_disabled"));
+    }
+
+    #[test]
+    fn test_memory_pressure_reason() {
+        let findings = vec![
+            MemoryFinding { indicator: "high_commit".into(), severity: "high".into(),
+                evidence: "...".into(), recommendation: "...".into() },
+            MemoryFinding { indicator: "lfh_disabled".into(), severity: "medium".into(),
+                evidence: "...".into(), recommendation: "...".into() },
+        ];
+        let reason = MemoryLeakAnalyzer::pressure_reason(&findings);
+        assert!(reason.contains("严重"));
+        // Empty findings = empty reason
+        assert!(MemoryLeakAnalyzer::pressure_reason(&[]).is_empty());
     }
 }
