@@ -5,5 +5,7 @@ edition.workspace = true
 description = "Batch orchestration and public analyze() API"
 
 [dependencies]
+dmp-context = { path = "../dmp-context" }
+dmp-parser = { path = "../dmp-parser" }
 dmp-engine = { path = "../dmp-engine" }
-rayon = "1"
+serde_json = "1"
