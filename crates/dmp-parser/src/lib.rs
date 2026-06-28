@@ -243,6 +243,272 @@ pub fn parse_exception_info(raw: &str) -> ExceptionInfo {
     info
 }
 
+// ── System info parser ───────────────────────────────────
+
+pub fn parse_system_info(raw: &str) -> SystemInfo {
+    let mut si = SystemInfo::default();
+
+    // OS: "Windows 10 Version 26200 MP (12 procs) Free x64"
+    let os_re = Regex::new(r"(Windows\s+\S+)\s+Version\s+(\d+)\s+MP\s*\((\d+)\s+procs?\)\s*\w*\s*(\w+)").unwrap();
+    if let Some(cap) = os_re.captures(raw) {
+        si.os_name = cap[1].to_string();
+        si.os_build = cap[2].to_string();
+        si.cpu_count = cap[3].parse().unwrap_or(0);
+        si.platform = cap[4].to_lowercase();
+    }
+
+    // OS version
+    let ver_re = Regex::new(r"OS_VERSION:\s*([\d.]+)").unwrap();
+    if let Some(cap) = ver_re.captures(raw) {
+        si.os_version = cap[1].to_string();
+    }
+
+    // Machine name
+    let name_re = Regex::new(r"Machine Name:\s*(\S+)").unwrap();
+    if let Some(cap) = name_re.captures(raw) {
+        si.machine_name = Some(cap[1].to_string());
+    }
+
+    // System uptime
+    let up_re = Regex::new(r"System Uptime:\s*(?:(\d+)\s*days?\s*)?(?:(\d+):(\d+):(\d+))?").unwrap();
+    if let Some(cap) = up_re.captures(raw) {
+        let days: u64 = cap.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+        let hours: u64 = cap.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+        let mins: u64 = cap.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+        let secs: u64 = cap.get(4).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+        si.system_uptime_seconds = days * 86400 + hours * 3600 + mins * 60 + secs;
+    }
+
+    // CPU model
+    let cpu_re = Regex::new(r"Processor:\s*(.+?)(?:\n|$)").unwrap();
+    if let Some(cap) = cpu_re.captures(raw) {
+        si.cpu_model = cap[1].trim().to_string();
+    }
+
+    // CPU features
+    let feat_re = Regex::new(r"(SSE2?|SSE3|SSSE3|SSE4\.[12]|AVX2?|AVX512\w*|FMA\d|BMI[12]|RDRAND|RTM)").unwrap();
+    for cap in feat_re.captures_iter(raw) {
+        si.cpu_features.push(cap[1].to_string());
+    }
+
+    // Physical memory (handle "Physical: 0x... ( 16384 Mb )" with optional spaces)
+    if let Some(cap) = Regex::new(r"(?i)Physical:\s*[0-9a-f`x]+\s*\(\s*(\d+)\s*Mb").unwrap().captures(raw) {
+        si.total_physical_mb = cap[1].parse().unwrap_or(0);
+    }
+    if let Some(cap) = Regex::new(r"(?i)Avail:\s*[0-9a-f`x]+\s*\(\s*(\d+)\s*Mb").unwrap().captures(raw) {
+        si.available_physical_mb = cap[1].parse().unwrap_or(0);
+    }
+    if let Some(cap) = Regex::new(r"(?i)PageFile:\s*[0-9a-f`x]+\s*\(\s*(\d+)\s*Mb").unwrap().captures(raw) {
+        si.total_pagefile_mb = cap[1].parse().unwrap_or(0);
+    }
+    if let Some(cap) = Regex::new(r"(?i)WorkingSet:\s*[0-9a-f`x]+\s*\(\s*(\d+)\s*Mb").unwrap().captures(raw) {
+        si.process_working_set_mb = cap[1].parse().unwrap_or(0);
+    }
+
+    // Environment variables
+    let env_re = Regex::new(r"(?m)^([A-Z_][A-Z0-9_]*)=(.*)$").unwrap();
+    for cap in env_re.captures_iter(raw) {
+        si.environment.insert(cap[1].to_string(), cap[2].trim().to_string());
+    }
+
+    si
+}
+
+// ── Callstack parser ─────────────────────────────────────
+
+pub fn parse_callstack(text: &str) -> Vec<Frame> {
+    let mut frames = Vec::new();
+    // Frame line: "00 00007ff7`12345678 myapp!main+0x42 [d:\src\main.cpp @ 342]"
+    let frame_re = Regex::new(
+        r"(?m)^\s*([0-9a-f]{2})\s+[0-9a-f`]+\s+(\w+)!([^+\s]+)(?:\+0x[0-9a-f]+)?\s*(?:\[([^@]+?)\s*@\s*(\d+)\])?"
+    ).unwrap();
+
+    for cap in frame_re.captures_iter(text) {
+        let idx: u32 = u32::from_str_radix(&cap[1], 16).unwrap_or(0);
+        let module = cap[2].to_string();
+        let func = format!("{}!{}", module, &cap[3]);
+        let source_file = cap.get(4).map(|m| m.as_str().trim().to_string());
+        let source_line = cap.get(5).and_then(|m| m.as_str().parse().ok());
+
+        frames.push(Frame {
+            frame_index: idx,
+            module,
+            function: func,
+            offset: String::new(),
+            source_file,
+            source_line,
+        });
+    }
+    frames
+}
+
+// ── All threads parser ───────────────────────────────────
+
+pub fn parse_all_threads(raw: &str) -> Vec<ThreadStack> {
+    let mut threads = Vec::new();
+    // Thread header: "   0  Id: 1a8c.1a90 Crashed <Memory Access Violation>"
+    let thread_re = Regex::new(
+        r"(?m)^\s+(\d+)\s+Id:\s*[0-9a-f]+\.([0-9a-f]+)\s*(\w+)(?:\s*<(.*?)>)?"
+    ).unwrap();
+
+    // Split by thread boundaries
+    let parts: Vec<&str> = raw.split('\n').collect();
+    let mut current_tid: u32 = 0;
+    let mut current_state = String::new();
+    let mut current_stack: Vec<String> = Vec::new();
+
+    for line in &parts {
+        if let Some(cap) = thread_re.captures(line) {
+            // Save previous thread
+            if current_tid != 0 && !current_stack.is_empty() {
+                let stack_text = current_stack.join("\n");
+                threads.push(ThreadStack {
+                    thread_id: current_tid,
+                    state: current_state.clone(),
+                    callstack: parse_callstack(&stack_text),
+                });
+            }
+            current_tid = u32::from_str_radix(&cap[2], 16).unwrap_or(0);
+            current_state = cap[3].to_string();
+            current_stack = Vec::new();
+        } else if current_tid != 0 && !line.trim().is_empty() {
+            current_stack.push(line.to_string());
+        }
+    }
+    // Don't forget the last thread
+    if current_tid != 0 && !current_stack.is_empty() {
+        let stack_text = current_stack.join("\n");
+        threads.push(ThreadStack {
+            thread_id: current_tid,
+            state: current_state,
+            callstack: parse_callstack(&stack_text),
+        });
+    }
+    threads
+}
+
+// ── Module list parser ───────────────────────────────────
+
+pub fn parse_module_list(raw: &str) -> Vec<ModuleInfo> {
+    let mut modules = Vec::new();
+    // "00007ff7`12340000 00007ff7`12350000 myapp"
+    let header_re = Regex::new(
+        r"(?m)^([0-9a-f`]+)\s+([0-9a-f`]+)\s+(\S+)"
+    ).unwrap();
+
+    let lines: Vec<&str> = raw.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        if let Some(cap) = header_re.captures(lines[i]) {
+            let name = cap[3].to_string();
+            // Skip known non-module words
+            if matches!(name.to_lowercase().as_str(),
+                "ret" | "call" | "jmp" | "start" | "end" | "module") {
+                i += 1;
+                continue;
+            }
+            let base = cap[1].replace('`', "");
+            let end = cap[2].replace('`', "");
+            let size = if let (Ok(b), Ok(e)) =
+                (u64::from_str_radix(&base, 16), u64::from_str_radix(&end, 16)) {
+                e.saturating_sub(b)
+            } else { 0 };
+
+            let mut path = String::new();
+            let mut version = None;
+            let mut has_symbols = false;
+
+            // Look ahead for detail lines
+            for j in (i + 1)..lines.len() {
+                let line = lines[j];
+                if header_re.is_match(line) { break; }
+                if let Some(pm) = Regex::new(r"Image path:\s*(.+)").unwrap().captures(line) {
+                    path = pm[1].trim().to_string();
+                }
+                if let Some(vm) = Regex::new(r"File version:\s*(.+)").unwrap().captures(line) {
+                    version = Some(vm[1].trim().to_string());
+                }
+                if line.contains("symbols loaded") || line.contains("PDB") {
+                    has_symbols = true;
+                }
+            }
+
+            modules.push(ModuleInfo {
+                name, path, base_address: base, size,
+                version, timestamp: None, has_symbols,
+            });
+        }
+        i += 1;
+    }
+    modules
+}
+
+// ── Register extraction ──────────────────────────────────
+
+pub fn extract_registers(raw: &str) -> std::collections::HashMap<String, String> {
+    let mut regs = std::collections::HashMap::new();
+    // Support both one-per-line and space-separated formats
+    let reg_re = Regex::new(
+        r"(?i)(rax|rcx|rdx|rbx|rsp|rbp|rsi|rdi|r8|r9|r10|r11|r12|r13|r14|r15|rip|eip|eax|ecx|edx|ebx|esp|ebp|esi|edi)\s*=\s*([0-9a-f`]+)"
+    ).unwrap();
+    for cap in reg_re.captures_iter(raw) {
+        regs.insert(cap[1].to_string(), cap[2].replace('`', ""));
+    }
+    regs
+}
+
+// ── Main entry: parse_cdb_output ─────────────────────────
+
+pub fn parse_cdb_output(raw: &str, dump_path: &str) -> DmpData {
+    let mut dmp = DmpData::default();
+
+    dmp.system_info = parse_system_info(raw);
+    dmp.exception = parse_exception_info(raw);
+    dmp.crash_callstack = extract_crash_callstack(raw);
+    dmp.all_callstacks = parse_all_threads(raw);
+    dmp.registers = extract_registers(raw);
+    dmp.raw_analyze_output = raw.to_string();
+
+    // Detect dump type from filename
+    let lower = dump_path.to_lowercase();
+    dmp.metadata.dump_type = if lower.contains("kernel") { "kernel".into() }
+        else if lower.contains("full") { "full".into() }
+        else { "minidump".into() };
+
+    dmp.metadata.timestamp = extract_crash_time(raw);
+    dmp.metadata.process_name = extract_process_name(raw);
+
+    dmp
+}
+
+fn extract_crash_callstack(raw: &str) -> Vec<Frame> {
+    // Extract from `.ecxr` context or STACK_TEXT section
+    let st_re = Regex::new(r"(?is)STACK_TEXT:?\s*\n(.*?)(?:\n\n|\z)").unwrap();
+    if let Some(cap) = st_re.captures(raw) {
+        return parse_callstack(&cap[1]);
+    }
+    // Fallback: LAST_CONTROL_TRANSFER
+    let lct_re = Regex::new(r"(?is)LAST_CONTROL_TRANSFER:.*?\n(.*?)(?:\n\n|\z)").unwrap();
+    if let Some(cap) = lct_re.captures(raw) {
+        return parse_callstack(&cap[1]);
+    }
+    Vec::new()
+}
+
+fn extract_crash_time(raw: &str) -> String {
+    let time_re = Regex::new(r"Debug session time:\s*(.+)").unwrap();
+    time_re.captures(raw)
+        .map(|c| c[1].trim().to_string())
+        .unwrap_or_default()
+}
+
+fn extract_process_name(raw: &str) -> String {
+    let pn_re = Regex::new(r"Process Name:\s*(\S+\.exe)").unwrap();
+    pn_re.captures(raw)
+        .map(|c| c[1].to_string())
+        .unwrap_or_default()
+}
+
 // ═════════════════════════════════════════════════════════
 // Tests
 // ═════════════════════════════════════════════════════════
@@ -370,8 +636,184 @@ Parameter[1]: 0000000000000000
     #[test]
     fn test_parse_size_to_mb_values() {
         assert_eq!(parse_size_to_mb("650.000 MB"), 650);
-        assert_eq!(parse_size_to_mb("1.813 GB"), 1856); // ~1.813*1024
-        assert!(parse_size_to_mb("127.992 TB") > 100_000_000); // huge
-        assert_eq!(parse_size_to_mb("512 KB"), 0); // < 1MB
+        assert_eq!(parse_size_to_mb("1.813 GB"), 1856);
+        assert!(parse_size_to_mb("127.992 TB") > 100_000_000);
+        assert_eq!(parse_size_to_mb("512 KB"), 0);
+    }
+
+    // ── System info tests ────────────────────────────────
+
+    const SAMPLE_SYSTEM_INFO: &str = r"Windows 10 Version 26200 MP (12 procs) Free x64
+Product: WinNt, suite: SingleUserTS
+Machine Name: DESKTOP-CRASH01
+OSNAME: Windows 10 Pro
+OS_VERSION: 10.0.26200.1
+OSPLATFORM_TYPE: x64
+System Uptime: 3 days 7:22:15
+Processor: Intel(R) Core(TM) i7-13700K
+PageFile: 0x0000000200000000 ( 8192 Mb )
+Physical: 0x0000000040000000 ( 16384 Mb )
+Avail: 0x0000000010000000 ( 4096 Mb )
+WorkingSet: 0x0000000008000000 ( 2048 Mb )
+COMPUTERNAME=DESKTOP-CRASH01
+TEMP=C:\Temp
+";
+
+    #[test]
+    fn test_parse_system_info_basic() {
+        let si = parse_system_info(SAMPLE_SYSTEM_INFO);
+        assert_eq!(si.os_name, "Windows 10");
+        assert_eq!(si.os_build, "26200");
+        assert_eq!(si.cpu_count, 12);
+        assert_eq!(si.platform, "x64");
+        assert_eq!(si.total_physical_mb, 16384);
+        assert_eq!(si.available_physical_mb, 4096);
+        assert_eq!(si.process_working_set_mb, 2048);
+    }
+
+    #[test]
+    fn test_parse_system_info_uptime() {
+        let si = parse_system_info(SAMPLE_SYSTEM_INFO);
+        // 3 days 7:22:15 = 3*86400 + 7*3600 + 22*60 + 15 = 259200 + 25200 + 1320 + 15 = 285735
+        assert!(si.system_uptime_seconds > 280_000);
+        assert!(si.system_uptime_seconds < 290_000);
+    }
+
+    #[test]
+    fn test_parse_system_info_env() {
+        let si = parse_system_info(SAMPLE_SYSTEM_INFO);
+        assert_eq!(si.environment.get("COMPUTERNAME").map(|s| s.as_str()), Some("DESKTOP-CRASH01"));
+        assert_eq!(si.environment.get("TEMP").map(|s| s.as_str()), Some(r"C:\Temp"));
+    }
+
+    // ── Callstack tests ──────────────────────────────────
+
+    const SAMPLE_CALLSTACK: &str = r"00 00007ff7`12345678 myapp!main+0x42 [d:\src\main.cpp @ 342]
+01 00007ff7`12346780 myapp!WorkerThread+0x120 [d:\src\worker.cpp @ 156]
+02 00007ff7`12347000 libcore!ProcessData+0x3f4
+03 00007fff`abcd1234 ntdll!RtlUserThreadStart+0x20
+";
+
+    #[test]
+    fn test_parse_callstack_basic() {
+        let frames = parse_callstack(SAMPLE_CALLSTACK);
+        assert_eq!(frames.len(), 4);
+        assert_eq!(frames[0].frame_index, 0);
+        assert_eq!(frames[0].module, "myapp");
+        assert!(frames[0].function.contains("main"));
+        assert_eq!(frames[0].source_file.as_deref(), Some(r"d:\src\main.cpp"));
+        assert_eq!(frames[0].source_line, Some(342));
+    }
+
+    #[test]
+    fn test_parse_callstack_no_source() {
+        let frames = parse_callstack(SAMPLE_CALLSTACK);
+        // Frame 2 has no source info
+        assert!(frames[2].source_file.is_none());
+        assert!(frames[2].source_line.is_none());
+    }
+
+    #[test]
+    fn test_parse_callstack_empty() {
+        let frames = parse_callstack("");
+        assert!(frames.is_empty());
+    }
+
+    // ── Thread tests ─────────────────────────────────────
+
+    const SAMPLE_THREADS: &str = r"   0  Id: 1a8c.1a90 Crashed <Memory Access Violation>
+00 00007ff6`11111111 myapp!CrashFunc+0x10
+01 00007ff6`22222222 myapp!main+0x42
+
+   1  Id: 1a8c.1a94 Waiting:UserRequest
+00 00007fff`33333333 ntdll!NtWaitForSingleObject+0x14
+";
+
+    #[test]
+    fn test_parse_all_threads_count() {
+        let threads = parse_all_threads(SAMPLE_THREADS);
+        assert_eq!(threads.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_all_threads_state() {
+        let threads = parse_all_threads(SAMPLE_THREADS);
+        assert_eq!(threads[0].state, "Crashed");
+    }
+
+    // ── Module tests ─────────────────────────────────────
+
+    const SAMPLE_MODULES: &str = r"start    end        module name
+00007ff7`12340000 00007ff7`12350000 myapp
+    Image path: C:\Program Files\MyApp\myapp.exe
+    File version: 1.2.3.4
+    PDB: myapp.pdb (symbols loaded)
+
+00007fff`abcd0000 00007fff`abcf0000 ntdll
+    Image path: C:\Windows\System32\ntdll.dll
+";
+
+    #[test]
+    fn test_parse_module_list_count() {
+        let mods = parse_module_list(SAMPLE_MODULES);
+        assert_eq!(mods.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_module_list_details() {
+        let mods = parse_module_list(SAMPLE_MODULES);
+        assert_eq!(mods[0].name, "myapp");
+        assert_eq!(mods[0].version.as_deref(), Some("1.2.3.4"));
+        assert!(mods[0].has_symbols);
+        assert!(mods[0].size > 0);
+    }
+
+    // ── Register tests ───────────────────────────────────
+
+    #[test]
+    fn test_extract_registers_x64() {
+        let raw = r"rax=0000000000000000 rbx=00007ff612345678 rcx=0000000000000001
+rip=00007ff610000000 rsp=000000325717c500";
+        let regs = extract_registers(raw);
+        assert_eq!(regs.get("rax").map(|s| s.as_str()), Some("0000000000000000"));
+        assert_eq!(regs.get("rip").map(|s| s.as_str()), Some("00007ff610000000"));
+        assert_eq!(regs.len(), 5);
+    }
+
+    // ── Integration tests ────────────────────────────────
+
+    const SAMPLE_FULL_CDB: &str = r"Debug session time: Mon Jun 23 15:26:44.000 2026 (UTC + 8:00)
+
+Windows 10 Version 26200 MP (12 procs) Free x64
+Machine Name: DESKTOP-CRASH01
+System Uptime: 1 days 2:00:00
+Processor: Intel(R) Core(TM) i7-13700K
+Physical: 0x0000000040000000 ( 16384 Mb )
+Avail: 0x0000000008000000 ( 2048 Mb )
+
+ExceptionCode: C0000005 (Access violation)
+ExceptionAddress: 00007ff6`12345678
+Process Name: myapp.exe
+
+STACK_TEXT:
+00 00007ff6`11111111 myapp!CrashFunc+0x10 [d:\src\main.cpp @ 42]
+01 00007ff6`22222222 myapp!WndProc+0x88 [d:\src\wnd.cpp @ 156]
+02 00007fff`33333333 ntdll!RtlUserThreadStart+0x20
+";
+
+    #[test]
+    fn test_parse_cdb_output_integration() {
+        let dmp = parse_cdb_output(SAMPLE_FULL_CDB, "crash.dmp");
+        assert_eq!(dmp.exception.code, "C0000005");
+        assert_eq!(dmp.metadata.dump_type, "minidump");
+        assert!(dmp.metadata.timestamp.contains("Jun"));
+        assert!(!dmp.crash_callstack.is_empty());
+        assert_eq!(dmp.crash_callstack[0].source_line, Some(42));
+    }
+
+    #[test]
+    fn test_parse_cdb_output_detect_kernel() {
+        let dmp = parse_cdb_output(SAMPLE_FULL_CDB, "kernel.dmp");
+        assert_eq!(dmp.metadata.dump_type, "kernel");
     }
 }
