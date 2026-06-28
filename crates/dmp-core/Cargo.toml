@@ -1,6 +1,9 @@
 [package]
 name = "dmp-core"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+description = "Batch orchestration and public analyze() API"
 
 [dependencies]
+dmp-engine = { path = "../dmp-engine" }
+rayon = "1"

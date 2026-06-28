@@ -1,6 +1,12 @@
 [package]
 name = "dmp-py"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+description = "PyO3 Python bindings for dmp-core"
+
+[lib]
+crate-type = ["cdylib"]
 
 [dependencies]
+dmp-core = { path = "../dmp-core" }
+pyo3 = { version = "0.23", features = ["extension-module"] }

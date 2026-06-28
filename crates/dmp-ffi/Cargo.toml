@@ -1,6 +1,11 @@
 [package]
 name = "dmp-ffi"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+description = "C FFI exports for dmp-core"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
+dmp-core = { path = "../dmp-core" }
