@@ -6,6 +6,7 @@ members = [
     "crates/dmp-core",
     "crates/dmp-ffi",
     "crates/dmp-py",
+    "crates/dmp-cli",
 ]
 resolver = "2"
 

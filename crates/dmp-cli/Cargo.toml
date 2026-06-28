@@ -1,0 +1,13 @@
+[package]
+name = "dmp-cli"
+version.workspace = true
+edition.workspace = true
+description = "CLI binary for DMP AI Analyzer"
+
+[[bin]]
+name = "dmp"
+path = "src/main.rs"
+
+[dependencies]
+dmp-core = { path = "../dmp-core", features = ["parallel"] }
+dmp-engine = { path = "../dmp-engine", features = ["http"] }
