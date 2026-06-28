@@ -3,11 +3,12 @@
 //! Provides the main `analyze()` and `analyze_batch()` entry points
 //! that tie together context, parser, engine, and AI modules.
 
+use serde::{Serialize, Deserialize};
 use dmp_context::*;
 pub use dmp_engine::ai::AiProvider;
 
 /// Options for DMP analysis.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyzeOptions {
     pub exe_dir: Option<String>,
     pub source_dir: Option<String>,
@@ -32,7 +33,7 @@ impl Default for AnalyzeOptions {
 }
 
 /// Result of analyzing a single DMP.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyzeResult {
     pub context: AnalysisContext,
     pub context_json: String,
@@ -42,7 +43,7 @@ pub struct AnalyzeResult {
 }
 
 /// Result of batch analysis.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchResult {
     pub results: Vec<AnalyzeResult>,
     pub summary_md: String,

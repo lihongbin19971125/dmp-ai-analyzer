@@ -2,10 +2,11 @@
 //! Ported from Python mvp/ai_client.py.
 //! Uses reqwest blocking HTTP client.
 
+use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
 
 /// Supported AI providers.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AiProvider {
     DeepSeek,
     OpenAI,

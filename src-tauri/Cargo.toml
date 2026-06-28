@@ -1,0 +1,20 @@
+[package]
+name = "dmp-tauri"
+version.workspace = true
+edition.workspace = true
+description = "Tauri desktop application for DMP AI Analyzer"
+
+[lib]
+name = "dmp_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dmp-core = { path = "../crates/dmp-core", features = ["parallel"] }
+dmp-engine = { path = "../crates/dmp-engine", features = ["http"] }

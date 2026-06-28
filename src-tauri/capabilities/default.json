@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicedoc/tauri-templates/main/capabilities/default.json",
+  "identifier": "default",
+  "description": "Default capabilities for DMP AI Analyzer",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default"
+  ]
+}

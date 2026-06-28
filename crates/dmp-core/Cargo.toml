@@ -8,6 +8,7 @@ description = "Batch orchestration and public analyze() API"
 dmp-context = { path = "../dmp-context" }
 dmp-parser = { path = "../dmp-parser" }
 dmp-engine = { path = "../dmp-engine" }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rayon = { version = "1", optional = true }
 
