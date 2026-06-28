@@ -2,11 +2,66 @@
 //! Wraps dmp_core::analyze() and dmp_core::analyze_batch() as Tauri commands.
 
 use dmp_core::{AiProvider, AnalyzeOptions, AnalyzeResult, BatchResult};
+use serde::{Serialize, Deserialize};
 use std::sync::Mutex;
+
+/// User settings persisted to disk.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSettings {
+    pub exe_dir: String,
+    pub symbol_paths: String,
+    pub provider: String,
+    pub api_key: String,
+    pub json_only: bool,
+}
+
+impl Default for UserSettings {
+    fn default() -> Self {
+        Self {
+            exe_dir: String::new(),
+            symbol_paths: String::new(),
+            provider: "deepseek".into(),
+            api_key: String::new(),
+            json_only: false,
+        }
+    }
+}
 
 /// Application state shared across commands.
 pub struct AppState {
     pub last_result: Mutex<Option<AnalyzeResult>>,
+}
+
+fn settings_path() -> std::path::PathBuf {
+    let base = std::env::var("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let dir = base.join("dmp-analyzer");
+    std::fs::create_dir_all(&dir).ok();
+    dir.join("settings.json")
+}
+
+/// Save user settings to disk.
+#[tauri::command]
+fn save_settings(settings: UserSettings) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(&settings)
+        .map_err(|e| format!("Serialize error: {}", e))?;
+    std::fs::write(settings_path(), json)
+        .map_err(|e| format!("Write error: {}", e))
+}
+
+/// Load user settings from disk.
+#[tauri::command]
+fn load_settings() -> Result<UserSettings, String> {
+    let path = settings_path();
+    if path.exists() {
+        let json = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Read error: {}", e))?;
+        serde_json::from_str(&json)
+            .map_err(|e| format!("Parse error: {}", e))
+    } else {
+        Ok(UserSettings::default())
+    }
 }
 
 /// Analyze a single DMP file.
@@ -180,6 +235,30 @@ mod tests {
         let guard = state.last_result.lock().unwrap();
         assert!(guard.is_none());
     }
+
+    #[test]
+    fn test_user_settings_default() {
+        let s = UserSettings::default();
+        assert_eq!(s.provider, "deepseek");
+        assert!(s.exe_dir.is_empty());
+        assert!(!s.json_only);
+    }
+
+    #[test]
+    fn test_user_settings_serialization() {
+        let s = UserSettings {
+            exe_dir: "C:\\App".into(),
+            symbol_paths: "D:\\PDB".into(),
+            provider: "openai".into(),
+            api_key: "sk-test".into(),
+            json_only: true,
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        let parsed: UserSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.exe_dir, "C:\\App");
+        assert_eq!(parsed.provider, "openai");
+        assert_eq!(parsed.api_key, "sk-test");
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -193,6 +272,8 @@ pub fn run() {
             analyze_dmp,
             analyze_batch_dmp,
             get_version,
+            save_settings,
+            load_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
