@@ -1,6 +1,6 @@
 # DMP AI Analyzer — 使用说明书
 
-> 版本: v0.2.0
+> 版本: v0.3.0
 > 更新日期: 2026-06-28
 
 ---
@@ -44,6 +44,7 @@
 
 | 维度 | 数值 |
 |------|------|
+| 语言 | Python (MVP) + **Rust** (核心引擎) |
 | 采集器 | 7 个 (DMP / 二进制 / 符号 / 日志 / 事件日志 / 源码 / 配置) |
 | AI 后端 | DeepSeek / OpenAI / Anthropic |
 | AI Prompt | 6 种专用模板（按异常类型自动选择） |
@@ -51,9 +52,12 @@
 | 报告格式 | Markdown + HTML + PDF |
 | 内存分析 | 9 项泄漏检测规则 + 堆/虚拟地址分析 |
 | 批量分析 | glob + 关联分析（≤10 DMP） |
+| 并行 CDB | rayon 线程池 |
 | 报告对比 | --diff 两份报告差异对比 |
 | CDB 缓存 | SHA256 + 200MB LRU |
-| 测试覆盖 | 283 passed, 0 failed |
+| Rust 测试 | 124 passed, 0 failures (6 crates) |
+| Python 测试 | 283 passed (15 files) |
+| **嵌入能力** | C FFI + PyO3 绑定 |
 
 ---
 
@@ -95,7 +99,103 @@ python -m mvp --help
 
 ---
 
-## 快速开始
+## Rust 核心引擎 (v0.3.0 新增)
+
+除了 Python CLI，DMP AI Analyzer 现在提供 Rust 核心引擎，可作为库嵌入任何语言。
+
+### Cargo 依赖
+
+```toml
+[dependencies]
+dmp-core = { path = "crates/dmp-core", features = ["http", "parallel"] }
+```
+
+### Rust API
+
+```rust
+use dmp_core::*;
+
+// 单 DMP 分析
+let opts = AnalyzeOptions {
+    exe_dir: Some(r"C:\MyApp".into()),
+    symbol_paths: vec![r"D:\Symbols".into()],
+    provider: AiProvider::DeepSeek,
+    timeout_secs: 120,
+    json_only: false,
+    ..Default::default()
+};
+
+let result = analyze(r"C:\dumps\crash.dmp", &opts)?;
+println!("{}", result.report_md);
+
+// 批量分析
+let patterns = vec![
+    r"C:\dumps\crash1.dmp".into(),
+    r"C:\dumps\crash2.dmp".into(),
+];
+let batch = analyze_batch(&patterns, &opts)?;
+println!("{}", batch.summary_md);
+```
+
+### Python 绑定 (PyO3)
+
+```python
+import _core  # PyO3 native module
+
+result = _core.analyze(
+    r"C:\dumps\crash.dmp",
+    exe_dir=r"C:\MyApp",
+    symbol_paths=[r"D:\Symbols"],
+    provider="deepseek",
+    json_only=True,  # 跳过 AI，仅返回结构化数据
+)
+
+print(result.report_md)
+print(result.context_json)
+```
+
+### C FFI
+
+```c
+// dmp_analyze 可从 C/C++/C#/Java 调用
+typedef struct {
+    char* context_json;
+    char* ai_analysis;
+    char* report_md;
+    char* error;
+} DmpResult;
+
+DmpResult result = dmp_analyze("crash.dmp");
+// 使用完毕后: dmp_result_free(&result);
+```
+
+### Build 要求
+
+| 组件 | 要求 |
+|------|------|
+| Rust 工具链 | 1.96+ (stable-x86_64-pc-windows-msvc) |
+| VS 2019+ | C++ 编译工具 (MSVC) |
+| Python 3.12+ | 仅 dmp-py 需要 |
+| Windows SDK | 10.0.19041+ (CDB 调试器) |
+
+### Cargo Features
+
+| Feature | Crate | 说明 |
+|---------|-------|------|
+| `http` | dmp-engine | AI API 调用 (reqwest + native-tls) |
+| `parallel` | dmp-core | 并行 CDB 批量分析 (rayon) |
+
+```bash
+# 编译所有 feature
+cargo build --release --features "http,parallel"
+
+# 运行全部 124 测试
+cargo test --workspace --features "http,parallel"
+```
+
+---
+
+## 快速开始 (Python CLI)
 
 ### 最简用法 (仅 DMP 基础分析)
 
