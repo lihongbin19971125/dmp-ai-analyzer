@@ -96,7 +96,8 @@ pub fn parse_heap_info(raw: &str) -> HeapInfo {
             total_segments += segments;
         }
 
-        if !heap_addr.is_empty() {
+        // Only accept real heap addresses (long hex), skip address-summary "Heap" rows
+        if heap_addr.len() >= 10 {
             info.per_heap_breakdown.push(PerHeapInfo {
                 address: heap_addr,
                 commit_mb,
@@ -263,6 +264,11 @@ pub fn parse_system_info(raw: &str) -> SystemInfo {
         si.os_version = cap[1].to_string();
     }
 
+    // OSNAME gives richer name (e.g. "Windows 10 Pro" vs "Windows 10")
+    if let Some(cap) = Regex::new(r"OSNAME:\s*(.+)").unwrap().captures(raw) {
+        si.os_name = cap[1].trim().to_string();
+    }
+
     // Machine name
     let name_re = Regex::new(r"Machine Name:\s*(\S+)").unwrap();
     if let Some(cap) = name_re.captures(raw) {
@@ -318,13 +324,17 @@ pub fn parse_system_info(raw: &str) -> SystemInfo {
 
 pub fn parse_callstack(text: &str) -> Vec<Frame> {
     let mut frames = Vec::new();
-    // Frame line: "00 00007ff7`12345678 myapp!main+0x42 [d:\src\main.cpp @ 342]"
+    // Handles two formats:
+    //   .ecxr:    "00 00007ff7`12345678 myapp!main+0x42 [d:\src\main.cpp @ 342]"
+    //   STACK_TEXT: "00000032`5717c530 00007ff6`12345678 myapp!CrashFunc+0x10 [d:\src\crash.cpp @ 42]"
     let frame_re = Regex::new(
-        r"(?m)^\s*([0-9a-f]{2})\s+[0-9a-f`]+\s+(\w+)!([^+\s]+)(?:\+0x[0-9a-f]+)?\s*(?:\[([^@]+?)\s*@\s*(\d+)\])?"
+        r"(?m)^\s*(?:([0-9a-f]{2})\s+)?[0-9a-f`]+\s+[0-9a-f`]+\s+(\w+)!([^+\s]+)(?:\+0x[0-9a-f]+)?\s*(?:\[([^@]+?)\s*@\s*(\d+)\])?"
     ).unwrap();
 
     for cap in frame_re.captures_iter(text) {
-        let idx: u32 = u32::from_str_radix(&cap[1], 16).unwrap_or(0);
+        let idx: u32 = cap.get(1)
+            .map(|m| u32::from_str_radix(m.as_str(), 16).unwrap_or(0))
+            .unwrap_or(frames.len() as u32);
         let module = cap[2].to_string();
         let func = format!("{}!{}", module, &cap[3]);
         let source_file = cap.get(4).map(|m| m.as_str().trim().to_string());
@@ -359,13 +369,14 @@ pub fn parse_all_threads(raw: &str) -> Vec<ThreadStack> {
 
     for line in &parts {
         if let Some(cap) = thread_re.captures(line) {
-            // Save previous thread
-            if current_tid != 0 && !current_stack.is_empty() {
+            // Save previous thread (even if callstack is empty)
+            if current_tid != 0 {
                 let stack_text = current_stack.join("\n");
                 threads.push(ThreadStack {
                     thread_id: current_tid,
                     state: current_state.clone(),
-                    callstack: parse_callstack(&stack_text),
+                    callstack: if stack_text.is_empty() { Vec::new() }
+                        else { parse_callstack(&stack_text) },
                 });
             }
             current_tid = u32::from_str_radix(&cap[2], 16).unwrap_or(0);
@@ -375,13 +386,14 @@ pub fn parse_all_threads(raw: &str) -> Vec<ThreadStack> {
             current_stack.push(line.to_string());
         }
     }
-    // Don't forget the last thread
-    if current_tid != 0 && !current_stack.is_empty() {
+    // Don't forget the last thread (even if callstack is empty)
+    if current_tid != 0 {
         let stack_text = current_stack.join("\n");
         threads.push(ThreadStack {
             thread_id: current_tid,
             state: current_state,
-            callstack: parse_callstack(&stack_text),
+            callstack: if stack_text.is_empty() { Vec::new() }
+                else { parse_callstack(&stack_text) },
         });
     }
     threads
@@ -401,9 +413,10 @@ pub fn parse_module_list(raw: &str) -> Vec<ModuleInfo> {
     while i < lines.len() {
         if let Some(cap) = header_re.captures(lines[i]) {
             let name = cap[3].to_string();
-            // Skip known non-module words
+            // Skip known non-module words and callstack symbols (contain "!")
             if matches!(name.to_lowercase().as_str(),
-                "ret" | "call" | "jmp" | "start" | "end" | "module") {
+                "ret" | "call" | "jmp" | "start" | "end" | "module")
+                || name.contains('!') {
                 i += 1;
                 continue;
             }
@@ -824,7 +837,8 @@ TEMP=C:\Temp
     #[test]
     fn test_parse_system_info_basic() {
         let si = parse_system_info(SAMPLE_SYSTEM_INFO);
-        assert_eq!(si.os_name, "Windows 10");
+        // OS line captures "Windows 10", but OSNAME line overrides to "Windows 10 Pro"
+        assert_eq!(si.os_name, "Windows 10 Pro");
         assert_eq!(si.os_build, "26200");
         assert_eq!(si.cpu_count, 12);
         assert_eq!(si.platform, "x64");

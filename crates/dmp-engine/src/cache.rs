@@ -197,7 +197,6 @@ fn dirs_home() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     fn temp_cache(prefix: &str) -> CacheManager {
         let dir = std::env::temp_dir().join(prefix);

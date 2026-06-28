@@ -3,11 +3,11 @@
 //! All structs implement `Serialize` for JSON output, matching
 //! the Python `AnalysisContext.to_dict()` format exactly.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // ── SystemInfo ────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SystemInfo {
     pub os_name: String,
     pub os_version: String,
@@ -49,7 +49,7 @@ impl Default for SystemInfo {
 
 // ── DmpMetadata ───────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DmpMetadata {
     pub dump_type: String,
     pub timestamp: String,
@@ -68,7 +68,7 @@ impl Default for DmpMetadata {
 
 // ── ExceptionInfo ─────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExceptionInfo {
     pub code: String,
     pub name: String,
@@ -93,7 +93,7 @@ impl Default for ExceptionInfo {
 
 // ── Frame ─────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Frame {
     pub frame_index: u32,
     pub module: String,
@@ -113,7 +113,7 @@ impl Default for Frame {
 
 // ── ThreadStack ───────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ThreadStack {
     pub thread_id: u32,
     pub state: String,
@@ -128,7 +128,7 @@ impl Default for ThreadStack {
 
 // ── ModuleInfo ────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModuleInfo {
     pub name: String,
     pub path: String,
@@ -149,7 +149,7 @@ impl Default for ModuleInfo {
 
 // ── LockInfo ──────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LockInfo {
     pub lock_type: String,
     pub address: String,
@@ -166,7 +166,7 @@ impl Default for LockInfo {
 
 // ── HeapInfo ──────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HeapInfo {
     pub total_committed_mb: u32,
     pub total_reserved_mb: u32,
@@ -179,7 +179,7 @@ pub struct HeapInfo {
     pub per_heap_breakdown: Vec<PerHeapInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PerHeapInfo {
     pub address: String,
     pub commit_mb: u32,
@@ -199,7 +199,7 @@ impl Default for HeapInfo {
 
 // ── DmpData ───────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DmpData {
     pub system_info: SystemInfo,
     pub metadata: DmpMetadata,
@@ -215,7 +215,7 @@ pub struct DmpData {
     pub raw_analyze_output: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MemoryFinding {
     pub indicator: String,
     pub severity: String,
@@ -240,14 +240,14 @@ impl Default for DmpData {
 
 // ── AnalysisContext ───────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AnalysisContext {
     #[serde(flatten)]
     pub meta: ContextMeta,
     pub dmp: DmpData,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContextMeta {
     pub dump_path: String,
     pub exe_dir: Option<String>,

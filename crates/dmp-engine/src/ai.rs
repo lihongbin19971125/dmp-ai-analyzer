@@ -119,6 +119,7 @@ pub fn analyze(
     }
 }
 
+#[cfg(feature = "http")]
 fn provider_to_str(p: &AiProvider) -> &str {
     match p { AiProvider::DeepSeek => "deepseek", AiProvider::OpenAI => "openai", AiProvider::Anthropic => "anthropic" }
 }

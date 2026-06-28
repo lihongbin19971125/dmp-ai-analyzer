@@ -5,7 +5,7 @@ members = [
     "crates/dmp-engine",
     "crates/dmp-core",
     "crates/dmp-ffi",
-    "crates/dmp-py",
+    # dmp-py excluded: requires Python 3.x + maturin
 ]
 resolver = "2"
 
