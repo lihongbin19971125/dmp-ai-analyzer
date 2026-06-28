@@ -13,3 +13,5 @@ target/          # Rust
 batch_summary.md # generated
 .DS_Store
 .vscode/
+target/
+Cargo.lock
