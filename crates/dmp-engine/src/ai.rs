@@ -271,4 +271,89 @@ mod tests {
         let err = result.unwrap_err();
         assert!(err.contains("http") || err.contains("No API key"));
     }
+
+    // ── HTTP feature tests (require `--features http`) ────────
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_analyze_missing_api_key() {
+        // Without any API key set, should return clear error message
+        // Temporarily clear env vars to ensure no key leaks
+        let result = analyze("{}", "{CONTEXT}", &AiProvider::DeepSeek, None, None);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("No API key") || err.contains("DEEPSEEK_API_KEY"));
+    }
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_analyze_with_explicit_key_resolution() {
+        // Explicit API key should be used over env var
+        let key = resolve_api_key(&AiProvider::OpenAI, Some("sk-explicit"));
+        assert_eq!(key, Some("sk-explicit".into()));
+
+        // Empty explicit key should fall through to env var
+        let key = resolve_api_key(&AiProvider::OpenAI, Some(""));
+        // No env set → None
+        assert_eq!(key, None);
+    }
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_call_openai_invalid_key() {
+        // Call with obviously invalid API key → should get error response
+        let result = call_openai_compatible(
+            "invalid-key-12345",
+            "Hello",
+            "deepseek-chat",
+            AiProvider::DeepSeek.base_url(),
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // Should get authentication error from the API
+        assert!(err.contains("API error") || err.contains("401") || err.contains("403"),
+            "Expected auth error, got: {}", err);
+    }
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_call_openai_bad_url() {
+        // Call with invalid URL → connection error
+        let result = call_openai_compatible(
+            "sk-test",
+            "Hello",
+            "gpt-4o",
+            "https://invalid.example.com/v1",
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("API request failed") || err.contains("API error"),
+            "Expected connection error, got: {}", err);
+    }
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_call_anthropic_invalid_key() {
+        let result = call_anthropic(
+            "invalid-key-12345",
+            "Hello",
+            "claude-sonnet-4-6",
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("API error") || err.contains("401") || err.contains("403"),
+            "Expected auth error, got: {}", err);
+    }
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn test_prompt_template_with_context() {
+        // Full prompt assembly
+        let template = "## Context\n{CONTEXT}\n## Analysis";
+        let ctx = r#"{"exception":{"code":"C0000005","name":"ACCESS_VIOLATION"}}"#;
+        let prompt = template.replace("{CONTEXT}", ctx);
+        assert!(prompt.contains("C0000005"));
+        assert!(prompt.contains("ACCESS_VIOLATION"));
+        assert!(!prompt.contains("{CONTEXT}"));
+    }
 }

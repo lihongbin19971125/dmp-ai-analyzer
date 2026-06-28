@@ -134,6 +134,7 @@ pub fn analyze(_dump_path: &str, _opts: &AnalyzeOptions) -> Result<AnalyzeResult
 }
 
 /// Batch analysis of multiple DMPs.
+/// Uses parallel CDB execution when `parallel` feature is enabled.
 #[cfg(windows)]
 pub fn analyze_batch(patterns: &[String], opts: &AnalyzeOptions) -> Result<BatchResult, String> {
     let files = expand_patterns(patterns);
@@ -144,11 +145,7 @@ pub fn analyze_batch(patterns: &[String], opts: &AnalyzeOptions) -> Result<Batch
         return Err(format!("Maximum 10 DMPs allowed, got {}", files.len()));
     }
 
-    // Sequential CDB collection (parallel with rayon when 'parallel' feature added)
-    let results: Vec<Result<AnalyzeResult, String>> = files
-        .iter()
-        .map(|f| analyze(f, opts))
-        .collect();
+    let results: Vec<Result<AnalyzeResult, String>> = collect_results(&files, opts);
 
     let mut ok_results = Vec::new();
     let mut errors = Vec::new();
@@ -172,6 +169,18 @@ pub fn analyze_batch(patterns: &[String], opts: &AnalyzeOptions) -> Result<Batch
     };
 
     Ok(BatchResult { results: ok_results, summary_md: summary })
+}
+
+/// Collect analysis results — parallel when `parallel` feature is on.
+#[cfg(all(windows, feature = "parallel"))]
+fn collect_results(files: &[String], opts: &AnalyzeOptions) -> Vec<Result<AnalyzeResult, String>> {
+    use rayon::prelude::*;
+    files.par_iter().map(|f| analyze(f, opts)).collect()
+}
+
+#[cfg(all(windows, not(feature = "parallel")))]
+fn collect_results(files: &[String], opts: &AnalyzeOptions) -> Vec<Result<AnalyzeResult, String>> {
+    files.iter().map(|f| analyze(f, opts)).collect()
 }
 
 #[cfg(not(windows))]
@@ -256,5 +265,55 @@ mod tests {
     fn test_expand_patterns_empty() {
         let files = expand_patterns(&["/nonexistent/*.dmp".into()]);
         assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_batch_empty_patterns() {
+        let opts = AnalyzeOptions::default();
+        let result = analyze_batch(&[], &opts);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No DMP files"));
+    }
+
+    #[test]
+    fn test_batch_too_many_files() {
+        let opts = AnalyzeOptions::default();
+        // Create 11 temp files to exceed the limit
+        let tmp = std::env::temp_dir().join(format!("dmp_batch_{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let mut paths = Vec::new();
+        for i in 0..11 {
+            let p = tmp.join(format!("crash_{}.dmp", i));
+            std::fs::write(&p, b"fake dmp").unwrap();
+            paths.push(p.to_string_lossy().to_string());
+        }
+        let result = analyze_batch(&paths, &opts);
+        std::fs::remove_dir_all(&tmp).ok();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Maximum 10"));
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn test_parallel_feature_available() {
+        // Verify rayon is linked and parallel types are accessible
+        use rayon::prelude::*;
+        let data: Vec<u32> = (0..10).collect();
+        let sum: u32 = data.par_iter().map(|x| x * 2).sum();
+        assert_eq!(sum, 90);
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn test_collect_results_structure() {
+        // collect_results returns Vec<Result<>> regardless of parallel/sequential
+        let opts = AnalyzeOptions::default();
+        let files = vec!["nonexistent1.dmp".into(), "nonexistent2.dmp".into()];
+        let results: Vec<_> = collect_results(&files, &opts);
+        assert_eq!(results.len(), 2);
+        // Both should be errors (file doesn't exist)
+        for r in &results {
+            assert!(r.is_err());
+        }
     }
 }
