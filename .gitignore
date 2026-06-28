@@ -16,3 +16,4 @@ batch_summary.md # generated
 target/
 node_modules/
 src-tauri/gen/
+.claude/
