@@ -1,6 +1,9 @@
 [package]
 name = "dmp-parser"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+description = "CDB output parsers and memory leak analyzer"
 
 [dependencies]
+dmp-context = { path = "../dmp-context" }
+regex = "1"
