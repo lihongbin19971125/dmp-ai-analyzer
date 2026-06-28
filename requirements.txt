@@ -1,0 +1,5 @@
+openai>=1.0
+anthropic>=0.30
+rich>=13.0
+pefile>=2023.0
+weasyprint>=60.0
