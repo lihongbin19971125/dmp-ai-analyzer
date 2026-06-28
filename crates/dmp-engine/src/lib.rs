@@ -4,6 +4,7 @@
 //! template (prompt selection), diff (report comparison).
 
 pub mod cache;
+pub mod cdb;
 pub mod report;
 pub mod template;
 pub mod diff;
