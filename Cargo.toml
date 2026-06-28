@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "crates/dmp-context",
+    "crates/dmp-parser",
+    "crates/dmp-engine",
+    "crates/dmp-core",
+    "crates/dmp-ffi",
+    "crates/dmp-py",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
