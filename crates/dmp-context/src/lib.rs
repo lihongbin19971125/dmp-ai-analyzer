@@ -271,50 +271,6 @@ impl Default for ContextMeta {
     }
 }
 
-// ── API Types ─────────────────────────────────────────────
-
-#[derive(Debug, Clone)]
-pub enum AiProvider { DeepSeek, OpenAI, Anthropic }
-
-#[derive(Debug, Clone)]
-pub struct AnalyzeOptions {
-    pub exe_dir: Option<String>,
-    pub source_dir: Option<String>,
-    pub log_dir: Option<String>,
-    pub symbol_paths: Vec<String>,
-    pub provider: AiProvider,
-    pub api_key: Option<String>,
-    pub model: Option<String>,
-    pub timeout_secs: u64,
-    pub workers: usize,
-    pub no_cache: bool,
-    pub json_only: bool,
-}
-
-impl Default for AnalyzeOptions {
-    fn default() -> Self {
-        Self { exe_dir: None, source_dir: None, log_dir: None,
-               symbol_paths: Vec::new(), provider: AiProvider::DeepSeek,
-               api_key: None, model: None, timeout_secs: 120,
-               workers: 0, no_cache: false, json_only: false }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct AnalyzeResult {
-    pub context: AnalysisContext,
-    pub context_json: String,
-    pub ai_analysis: String,
-    pub report_md: String,
-    pub report_html: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct BatchResult {
-    pub results: Vec<AnalyzeResult>,
-    pub summary_md: String,
-}
-
 // ═══════════════════════════════════════════════════════════
 // Tests
 // ═══════════════════════════════════════════════════════════
@@ -458,24 +414,5 @@ mod tests {
         assert_eq!(parsed["dump_path"], r"C:\dumps\crash.dmp");
         assert_eq!(parsed["exe_dir"], r"C:\MyApp");
         assert_eq!(parsed["dmp"]["exception"]["code"], "C0000005");
-    }
-
-    #[test]
-    fn test_analyze_options_defaults() {
-        let opts = AnalyzeOptions::default();
-        assert!(matches!(opts.provider, AiProvider::DeepSeek));
-        assert_eq!(opts.timeout_secs, 120);
-        assert_eq!(opts.workers, 0);
-        assert!(!opts.no_cache);
-    }
-
-    #[test]
-    fn test_analyze_options_custom() {
-        let opts = AnalyzeOptions {
-            provider: AiProvider::Anthropic, workers: 4, timeout_secs: 300,
-            ..Default::default()
-        };
-        assert!(matches!(opts.provider, AiProvider::Anthropic));
-        assert_eq!(opts.workers, 4);
     }
 }

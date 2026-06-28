@@ -76,9 +76,6 @@ pub fn system_message() -> Value {
     })
 }
 
-/// Re-export from context for convenience.
-pub use dmp_context::AiProvider as Provider;
-
 /// Analyze a crash dump using AI (requires `http` feature).
 /// Without `http` feature, returns an error instructing to enable it.
 #[cfg(not(feature = "http"))]

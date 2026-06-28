@@ -4,7 +4,7 @@
 //! that tie together context, parser, engine, and AI modules.
 
 use dmp_context::*;
-use dmp_engine::ai::AiProvider;
+pub use dmp_engine::ai::AiProvider;
 
 /// Options for DMP analysis.
 #[derive(Debug, Clone)]
