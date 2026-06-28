@@ -3,7 +3,7 @@
 > AI-powered Windows crash dump analysis tool. Drop a `.dmp` file, get root cause analysis in seconds.
 
 [![Rust](https://img.shields.io/badge/Rust-1.96%2B-orange)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-152%20passed-brightgreen)](https://github.com/Admin/dmp-ai-analyzer/actions)
+[![Tests](https://img.shields.io/badge/tests-152%20passed-brightgreen)](https://github.com/lihongbin19971125/dmp-ai-analyzer/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 ## Features
@@ -19,7 +19,7 @@
 
 ### Desktop App
 
-Download `dmp-tauri.exe` from [Releases](https://github.com/Admin/dmp-ai-analyzer/releases), double-click to run.
+Download `dmp-tauri.exe` from [Releases](https://github.com/lihongbin19971125/dmp-ai-analyzer/releases), double-click to run.
 
 ### CLI
 
@@ -50,7 +50,7 @@ println!("{}", result.report_md);
 ## Building from Source
 
 ```bash
-git clone https://github.com/Admin/dmp-ai-analyzer.git
+git clone https://github.com/lihongbin19971125/dmp-ai-analyzer.git
 cd dmp-ai-analyzer
 
 # Install dependencies
