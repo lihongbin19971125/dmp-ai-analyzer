@@ -4,6 +4,9 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static CDB_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Known CDB installation paths (Windows SDK).
 const CDB_SEARCH_PATHS: &[&str] = &[
@@ -77,10 +80,12 @@ pub fn run_cdb(
         cmd_string.push_str("; q");
     }
 
-    // Temp files for stdout/stderr
+    // Temp files for stdout/stderr (unique counter for parallel safety)
     let tmp_dir = std::env::temp_dir();
-    let out_path = tmp_dir.join(format!("cdb_out_{}.txt", std::process::id()));
-    let err_path = tmp_dir.join(format!("cdb_err_{}.txt", std::process::id()));
+    let n = CDB_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let uniq = format!("{}_{}", std::process::id(), n);
+    let out_path = tmp_dir.join(format!("cdb_out_{}.txt", uniq));
+    let err_path = tmp_dir.join(format!("cdb_err_{}.txt", uniq));
 
     let mut cmd = Command::new(&cdb);
     cmd.args(["-z", &dump_path.to_string_lossy()])
