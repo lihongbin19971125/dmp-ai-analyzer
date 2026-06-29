@@ -1,26 +1,41 @@
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { AnalyzeResult } from "../App";
 
 export default function ResultView({ result }: { result: AnalyzeResult }) {
   return (
     <div className="result-view">
-      <h2>Analysis Result</h2>
+      <h2>分析结果</h2>
 
       {result.success === false && (
-        <div className="error-box">Error: {result.error || "Unknown error"}</div>
+        <div className="error-box">错误: {result.error || "Unknown error"}</div>
       )}
 
       {result.ai_analysis && (
         <section>
-          <h3>AI Analysis</h3>
-          <div className="analysis-content markdown-body">
-            <pre>{result.ai_analysis}</pre>
+          <h3>AI 分析</h3>
+          <div className="markdown-body">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {result.ai_analysis}
+            </ReactMarkdown>
           </div>
         </section>
       )}
 
+      {result.report_md && (
+        <details>
+          <summary>完整报告 (Markdown)</summary>
+          <div className="markdown-body">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {result.report_md}
+            </ReactMarkdown>
+          </div>
+        </details>
+      )}
+
       {result.context_json && (
         <details>
-          <summary>Context JSON</summary>
+          <summary>原始 JSON</summary>
           <pre className="json-content">
             {(() => {
               try {
@@ -30,13 +45,6 @@ export default function ResultView({ result }: { result: AnalyzeResult }) {
               }
             })()}
           </pre>
-        </details>
-      )}
-
-      {result.report_md && (
-        <details>
-          <summary>Full Report (Markdown)</summary>
-          <pre className="report-content">{result.report_md}</pre>
         </details>
       )}
     </div>

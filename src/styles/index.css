@@ -53,10 +53,43 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .result-view h2 { color: #e94560; margin-bottom: 16px; }
 .result-view section { margin-bottom: 20px; }
 .result-view h3 { font-size: 14px; color: #888; margin-bottom: 8px; }
-.analysis-content pre, .json-content, .report-content {
+.json-content {
   background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px;
   padding: 12px; font-size: 13px; line-height: 1.6; overflow-x: auto; white-space: pre-wrap;
 }
 details { margin: 12px 0; }
 details summary { cursor: pointer; color: #e94560; font-size: 14px; padding: 4px 0; }
 details summary:hover { color: #f0607e; }
+
+/* ── Markdown rendering ─────────────────────────────────── */
+.markdown-body { font-size: 14px; line-height: 1.7; color: #d0d0d0; }
+.markdown-body h1 { font-size: 22px; color: #e94560; margin: 24px 0 12px; border-bottom: 1px solid #333; padding-bottom: 8px; }
+.markdown-body h2 { font-size: 18px; color: #e94560; margin: 20px 0 10px; }
+.markdown-body h3 { font-size: 16px; color: #d88; margin: 16px 0 8px; }
+.markdown-body h4 { font-size: 14px; color: #ccc; margin: 12px 0 6px; }
+.markdown-body p { margin: 8px 0; }
+.markdown-body ul, .markdown-body ol { margin: 8px 0; padding-left: 24px; }
+.markdown-body li { margin: 4px 0; }
+.markdown-body strong { color: #fff; font-weight: 700; }
+.markdown-body em { color: #ddd; }
+.markdown-body code {
+  background: #2a2a3e; color: #e94560; padding: 2px 6px; border-radius: 4px;
+  font-family: "Cascadia Code", Consolas, monospace; font-size: 13px;
+}
+.markdown-body pre {
+  background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px;
+  padding: 14px; overflow-x: auto; margin: 12px 0;
+}
+.markdown-body pre code { background: none; color: #c0c0d0; padding: 0; }
+.markdown-body table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+.markdown-body th, .markdown-body td {
+  border: 1px solid #333; padding: 8px 12px; text-align: left;
+}
+.markdown-body th { background: #1a1a3e; color: #e94560; font-weight: 600; }
+.markdown-body tr:nth-child(even) { background: rgba(255,255,255,0.03); }
+.markdown-body blockquote {
+  border-left: 3px solid #e94560; margin: 12px 0; padding: 8px 16px;
+  background: rgba(233,69,96,0.08); color: #bbb;
+}
+.markdown-body hr { border: none; border-top: 1px solid #333; margin: 20px 0; }
+.markdown-body a { color: #e94560; }
